@@ -41,6 +41,9 @@ app = create_fastapi_app(
 
 
 # ── /tasks — list tasks + action schema ──────────────────
+@app.get("/")
+def root():
+    return JSONResponse(content={"message": "Welcome to the SQL Review Environment! Visit /docs for API documentation."})
 @app.get("/tasks")
 def list_tasks():
     """Return all tasks and the action schema (required for /step)."""
