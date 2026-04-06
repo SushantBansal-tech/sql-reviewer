@@ -1,66 +1,40 @@
 """
-models.py — Typed contracts for the SQL Query Review environment.
-
-The agent sees a broken/inefficient SQL query and must return a corrected version.
+models.py — Pydantic models for the SQL Query Reviewer environment.
+Uses openenv.core.env_server.types as base classes (Pydantic, not dataclasses).
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
-from openenv.core.env_server import Action, Observation, State
+from typing import Optional, Any, Dict
+from pydantic import Field
+from openenv.core.env_server.types import Action, Observation, State
 
 
-@dataclass
 class SQLReviewAction(Action):
-    """
-    The agent submits a corrected SQL query.
-    
-    Fields:
-        fixed_query  : The agent's corrected SQL string.
-        explanation  : Optional explanation of what was wrong and what was fixed.
-    """
-    fixed_query: str
-    explanation: Optional[str] = None
+    """What the agent submits — a corrected SQL query."""
+    fixed_query: str = Field(..., description="The corrected SQL query")
+    explanation: Optional[str] = Field(
+        default=None,
+        description="Optional explanation of what was fixed"
+    )
 
 
-@dataclass
 class SQLReviewObservation(Observation):
-    """
-    What the agent sees at each step.
-
-    Fields:
-        task_id            : Unique identifier for the current task.
-        difficulty         : "easy" | "medium" | "hard"
-        broken_query       : The SQL query the agent must fix.
-        schema_context     : The table schema relevant to this query.
-        error_description  : Human-readable description of what's wrong.
-        expected_behavior  : What the corrected query should do.
-        attempts_remaining : How many fix attempts are left.
-        last_score         : Score of the previous attempt (None if first).
-        last_feedback      : Feedback from the grader on the previous attempt.
-        done               : Whether the episode is complete.
-        reward             : Reward for the last action (None if first step).
-    """
-    task_id: str
-    difficulty: str
-    broken_query: str
-    schema_context: str
-    error_description: str
-    expected_behavior: str
-    attempts_remaining: int
-    last_score: Optional[float] = None
-    last_feedback: Optional[str] = None
-    done: bool = False
-    reward: Optional[float] = None
+    """What the agent sees at each step."""
+    task_id: str = Field(default="", description="Current task identifier")
+    difficulty: str = Field(default="", description="easy | medium | hard")
+    broken_query: str = Field(default="", description="The SQL query to fix")
+    schema_context: str = Field(default="", description="Relevant table schemas")
+    error_description: str = Field(default="", description="Plain English bug description")
+    expected_behavior: str = Field(default="", description="What the correct query should do")
+    attempts_remaining: int = Field(default=0, description="Attempts left on this task")
+    last_score: Optional[float] = Field(default=None, description="Score of last attempt")
+    last_feedback: Optional[str] = Field(default=None, description="Grader feedback")
+    # done and reward are inherited from Observation base class
 
 
-@dataclass
 class SQLReviewState(State):
-    """
-    Internal episode metadata.
-    """
-    episode_id: Optional[str] = None
-    step_count: int = 0
-    current_task_id: Optional[str] = None
-    current_difficulty: Optional[str] = None
-    cumulative_reward: float = 0.0
-    max_attempts: int = 3
+    """Internal episode metadata."""
+    # episode_id and step_count inherited from State base class
+    current_task_id: Optional[str] = Field(default=None)
+    current_difficulty: Optional[str] = Field(default=None)
+    cumulative_reward: float = Field(default=0.0)
+    max_attempts: int = Field(default=3)

@@ -24,7 +24,12 @@ from server.observation import SQLObservation
 from tasks import TASKS, TASK_ORDER
 
 def make_env():
-    return SQLReviewEnvironment()
+    try:
+        return SQLReviewEnvironment()
+    except Exception as e:
+        print("ENV INIT ERROR:", e)
+        raise e
+
 
 # ── Standard OpenEnv app ──────────────────────────────────
 

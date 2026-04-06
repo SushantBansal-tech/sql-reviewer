@@ -7,19 +7,11 @@ MANDATORY stdout format (judges parse this exactly):
   [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
   [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
 
-Rules:
-  - One [START] line at episode begin
-  - One [STEP] line per step, immediately after env.step() returns
-  - One [END] line after env.close(), ALWAYS emitted even on exception
-  - reward and rewards formatted to 2 decimal places
-  - done and success are lowercase: true or false
-  - error is the raw error string, or null if none
-  - All fields on a single line, no newlines within a line
-
 Environment variables (REQUIRED):
-  GEMINI_API_KEY      Your Google Gemini API key (get from https://aistudio.google.com/app/apikeys)
-  ENV_URL             Server URL (default: http://localhost:8000)
-  MODEL_NAME          Model to use (default: gemini-1.5-flash)
+  HF_TOKEN       Your Hugging Face API key (from https://huggingface.co/settings/tokens)
+  API_BASE_URL   LLM endpoint (default: https://router.huggingface.co/v1)
+  MODEL_NAME     Model to use (default: Qwen/Qwen2.5-72B-Instruct)
+  ENV_URL        Server URL (default: http://localhost:8000)
 """
 
 import asyncio
@@ -28,34 +20,33 @@ import sys
 import textwrap
 from typing import List, Optional
 
-# ✅ NEW: Use google.genai instead of deprecated google.generativeai
-import google.genai as genai
-from google.genai import types
+from openai import OpenAI
+from client import SQLReviewEnv, SQLReviewAction
 
-
-from client import SQLReviewEnv, SQLReviewAction , SQLReviewState
-
-
-# ── Config from environment variables ──────���─────────────
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME     = os.getenv("MODEL_NAME", "gemini-1.5-flash")
-ENV_URL        = os.getenv("ENV_URL", "http://localhost:8000")
-TASK_NAME      = os.getenv("SQL_REVIEW_TASK", "sql-query-review")
-BENCHMARK      = os.getenv("SQL_REVIEW_BENCHMARK", "sql-review-env")
+# ── Config from environment variables ────────────────────
+API_KEY      = "REMOVEDJQzbvUlTgxPYuCAiXQGETXcXAEnyCAHNcG"
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
+ENV_URL      = os.getenv("ENV_URL",      "http://localhost:8000")
+TASK_NAME    = os.getenv("SQL_REVIEW_TASK",      "sql-query-review")
+BENCHMARK    = os.getenv("SQL_REVIEW_BENCHMARK", "sql-review-env")
 
 MAX_STEPS               = 9
 TEMPERATURE             = 0.1
 MAX_TOKENS              = 400
 SUCCESS_SCORE_THRESHOLD = 0.6
 
-# ✅ Validate API key
-if not GEMINI_API_KEY:
-    print("[ERROR] GEMINI_API_KEY environment variable not set!", flush=True)
-    print("[ERROR] Get it from: https://aistudio.google.com/app/apikeys", flush=True)
+# ── Validate API key ──────────────────────────────────────
+if not API_KEY:
+    print("[ERROR] HF_TOKEN environment variable not set!", flush=True)
+    print("[ERROR] Get it from: https://huggingface.co/settings/tokens", flush=True)
     sys.exit(1)
 
-# ✅ Configure Gemini with new library
-genai.configure(api_key=GEMINI_API_KEY)
+# ── OpenAI client pointing to HuggingFace router ─────────
+llm_client = OpenAI(
+    base_url=API_BASE_URL,
+    api_key=API_KEY,
+)
 
 # ── System prompt ─────────────────────────────────────────
 SYSTEM_PROMPT = textwrap.dedent("""
@@ -112,7 +103,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     )
 
 
-# ── Build user prompt from observation ───────────────────
+# ── Build prompt from current observation ─────────────────
 def build_prompt(obs) -> str:
     feedback_hint = ""
     if obs.last_feedback:
@@ -138,61 +129,52 @@ def build_prompt(obs) -> str:
     """).strip()
 
 
-# ── Call Gemini API ──────────────────────────────────────
+# ── Call HuggingFace model via OpenAI client ──────────────
 def get_fixed_query(obs, history: List[str]) -> str:
-    """Call Google Gemini API using new google.genai library"""
     try:
-        # ✅ Use new google.genai API
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        
-        response = client.models.generate_content(
+        completion = llm_client.chat.completions.create(
             model=MODEL_NAME,
-            contents=types.ContentsType([
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(build_prompt(obs))]
-                )
-            ]),
-            config=types.GenerateContentConfig(
-                temperature=TEMPERATURE,
-                max_output_tokens=MAX_TOKENS,
-                system_instruction=SYSTEM_PROMPT,
-            )
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": build_prompt(obs)},
+            ],
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+            stream=False,
         )
-        
-        text = response.text.strip()
-        
-        # Strip accidental markdown fences
+        text = (completion.choices[0].message.content or "").strip()
+
+        # Strip accidental markdown fences if model adds them
         if text.startswith("```"):
             text = "\n".join(
                 line for line in text.split("\n")
                 if not line.strip().startswith("```")
             ).strip()
-        
+
         return text if text else "SELECT 1"
-    
+
     except Exception as exc:
-        print(f"[DEBUG] Gemini call failed: {exc}", flush=True)
+        print(f"[DEBUG] LLM call failed: {exc}", flush=True)
         return "SELECT 1"
 
 
 # ── Main async episode ────────────────────────────────────
 async def main() -> None:
-    print(f"[DEBUG] Using Gemini model: {MODEL_NAME}", flush=True)
-    print(f"[DEBUG] Connecting to env at: {ENV_URL}", flush=True)
-    
+    print(f"[DEBUG] Model       : {MODEL_NAME}", flush=True)
+    print(f"[DEBUG] API base URL: {API_BASE_URL}", flush=True)
+    print(f"[DEBUG] Env URL     : {ENV_URL}", flush=True)
+
     env = SQLReviewEnv(base_url=ENV_URL)
 
     history: List[str] = []
     rewards: List[float] = []
     steps_taken = 0
-    score = 0.0
+    score   = 0.0
     success = False
 
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        # Start a new episode
         result = await env.reset()
         obs    = result.observation
 
@@ -200,12 +182,10 @@ async def main() -> None:
             if result.done:
                 break
 
-            # Agent generates a fixed SQL query using Gemini
             fixed_query = get_fixed_query(obs, history)
 
             error = None
             try:
-                # Submit the fix to the environment
                 result = await env.step(SQLReviewAction(
                     fixed_query=fixed_query,
                     explanation="Baseline agent fix",
@@ -223,7 +203,6 @@ async def main() -> None:
             rewards.append(reward)
             steps_taken = step
 
-            # MANDATORY: one [STEP] line per step
             log_step(
                 step=step,
                 action=fixed_query,
@@ -240,17 +219,15 @@ async def main() -> None:
             if done:
                 break
 
-        # Compute final score clamped to [0, 1]
         if rewards:
-            score   = sum(rewards) / len(rewards)
-            score   = min(max(score, 0.0), 1.0)
+            score = sum(rewards) / len(rewards)
+            score = min(max(score, 0.0), 1.0)
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     except Exception as exc:
         print(f"[DEBUG] Episode error: {exc}", flush=True)
 
     finally:
-        # Always close the env and always emit [END]
         try:
             await env.close()
         except Exception as exc:

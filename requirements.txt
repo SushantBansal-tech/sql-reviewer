@@ -1,9 +1,10 @@
 openenv-core
 fastapi
-uvicorn[standard]
+uvicorn
 fastmcp
-pydantic>=2.0
+pydantic>=2.0,<3.0
 openai
 sqlparse
 requests
+google-generativeai
 google-genai
