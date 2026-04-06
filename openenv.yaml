@@ -1,0 +1,68 @@
+name: sql-query-reviewer
+version: "1.0.0"
+description: >
+  An OpenEnv environment where an AI agent must identify and fix bugs
+  in real-world SQL queries. Covers NULL handling, N+1 query patterns,
+  cartesian joins, SELECT *, and incorrect aggregations.
+  3 tasks with increasing difficulty (easy → medium → hard).
+
+author: sushantbansal2004@gmail.com
+tags:
+  - openenv
+  - sql
+  - code-review
+  - real-world
+  - data-engineering
+
+tasks:
+  - id: easy_null_filter
+    difficulty: easy
+    description: Fix a broken NULL comparison (= NULL → IS NULL)
+    max_score: 1.0
+
+  - id: medium_n_plus_one
+    difficulty: medium
+    description: Eliminate N+1 subqueries by rewriting with JOIN
+    max_score: 1.0
+
+  - id: hard_multi_bug
+    difficulty: hard
+    description: Fix cartesian join, SELECT *, wrong COUNT, wrong GROUP BY
+    max_score: 1.0
+
+action_space:
+  type: object
+  fields:
+    fixed_query:
+      type: string
+      description: The corrected SQL query
+    explanation:
+      type: string
+      required: false
+      description: Optional explanation of changes made
+
+observation_space:
+  type: object
+  fields:
+    task_id: string
+    difficulty: string
+    broken_query: string
+    schema_context: string
+    error_description: string
+    expected_behavior: string
+    attempts_remaining: integer
+    last_score: float
+    last_feedback: string
+    done: boolean
+    reward: float
+
+reward:
+  type: continuous
+  range: [-0.1, 1.0]
+  description: >
+    Reward = improvement in score over the agent's previous best attempt.
+    Penalises empty or unchanged submissions with -0.1.
+    Provides partial progress signal across the full trajectory.
+
+entry_point: server.app:app
+dockerfile: server/Dockerfile
