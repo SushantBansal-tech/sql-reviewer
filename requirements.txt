@@ -6,5 +6,6 @@ pydantic>=2.0,<3.0
 openai
 sqlparse
 requests
+gradio
 google-generativeai
 google-genai
